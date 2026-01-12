@@ -5,8 +5,6 @@ import pandas as pd
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from email.message import EmailMessage
-import smtplib
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -40,7 +38,6 @@ def generate_pdf(df, file_path):
 # Generate reports from SQL files
 def generate_reports(sql_file_path):
     reports = []
-    # First, get tables from SQL file (simple approach)
     with open(sql_file_path,'r',encoding='utf-8', errors='ignore') as f:
         content = f.read()
     detected_tables = []
@@ -65,29 +62,11 @@ def generate_reports(sql_file_path):
             print(f"Error generating report for {table_name}: {e}")
     return reports
 
-# Send Email
-def send_email(reports, recipient):
-    msg = EmailMessage()
-    msg['Subject'] = 'Your Reports from Access DB'
-    msg['From'] = 'noreply@database-system.com'
-    msg['To'] = recipient
-    msg.set_content('Attached are your requested reports.')
-
-    for excel_file, pdf_file in reports:
-        for f in [excel_file, pdf_file]:
-            with open(f,'rb') as file:
-                msg.add_attachment(file.read(), maintype='application', subtype='octet-stream', filename=os.path.basename(f))
-
-    with smtplib.SMTP_SSL('smtp.gmail.com',465) as smtp:
-        smtp.login("your@gmail.com","app-password")
-        smtp.send_message(msg)
-
 # Flask routes
 @app.route("/", methods=["GET","POST"])
 def home():
     if request.method == "POST":
         file = request.files['file']
-        email = request.form.get("email")
         mdb_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(mdb_path)
 
@@ -98,19 +77,14 @@ def home():
         # Generate reports
         reports = generate_reports(sql_path)
 
-        # Send email if provided
-        if email:
-            send_email(reports, email)
-
         download_links = "".join([f'<a href="/download/{os.path.basename(f)}">{os.path.basename(f)}</a><br>'
                                   for r in reports for f in r])
-        return f"<h3>Reports Generated ✅</h3>{download_links}<br>Email sent to: {email if email else 'N/A'}"
+        return f"<h3>Reports Generated ✅</h3>{download_links}"
 
     return """
     <h2>Upload Access 1998 MDB File</h2>
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="file" required><br><br>
-        <input type="email" name="email" placeholder="Enter email to receive reports"><br><br>
         <button type="submit">Upload & Generate Reports</button>
     </form>
     """
