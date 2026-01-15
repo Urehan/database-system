@@ -1,3 +1,76 @@
+from flask import Flask, request, send_from_directory, render_template_string
+import os
+import subprocess
+import pandas as pd
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib import colors
+
+app = Flask(__name__)
+
+UPLOAD_FOLDER = "uploads"
+REPORT_FOLDER = "reports"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(REPORT_FOLDER, exist_ok=True)
+
+HTML_PAGE = """
+<h2>Upload any MDB file</h2>
+<form method="POST" enctype="multipart/form-data">
+    <input type="file" name="mdb_file" accept=".mdb" required>
+    <button type="submit">Upload & Generate Reports</button>
+</form>
+"""
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if request.method == "POST":
+        file = request.files["mdb_file"]
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(file_path)
+
+        # Clear old reports
+        for f in os.listdir(REPORT_FOLDER):
+            os.remove(os.path.join(REPORT_FOLDER, f))
+
+        # Get tables dynamically via mdb-tools
+        tables = subprocess.check_output(["mdb-tables", file_path]).decode().strip().split()
+        if not tables:
+            return "No tables found in this MDB file!"
+
+        for table in tables:
+            csv_path = os.path.join(REPORT_FOLDER, f"{table}.csv")
+            with open(csv_path, "w", encoding="utf-8") as f:
+                subprocess.run(["mdb-export", file_path, table], stdout=f)
+
+            df = pd.read_csv(csv_path)
+
+            # Excel
+            excel_path = os.path.join(REPORT_FOLDER, f"{table}.xlsx")
+            df.to_excel(excel_path, index=False)
+
+            # PDF
+            pdf_path = os.path.join(REPORT_FOLDER, f"{table}.pdf")
+            doc = SimpleDocTemplate(pdf_path)
+            data = [df.columns.tolist()] + df.values.tolist()
+            t = Table(data)
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'CENTER'),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            doc.build([t])
+
+        links = [f"<a href='/reports/{f}'>{f}</a>" for f in os.listdir(REPORT_FOLDER)]
+        return f"Reports generated ✅<br>" + "<br>".join(links)
+
+    return render_template_string(HTML_PAGE)
+
+@app.route("/reports/<filename>")
+def download_report(filename):
+    return send_from_directory(REPORT_FOLDER, filename, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
 from flask import Flask, request, send_file
 import os
 import subprocess
@@ -100,3 +173,4 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT",10000))
     app.run(host="0.0.0.0", port=port, debug=True)
+
